@@ -1,36 +1,42 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI Hedge Fund
 
-## Getting Started
+A simulated trading platform with AI-powered analysis of stocks.
 
-First, run the development server:
+## Features
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- AI-powered analysis of stock tickers
+- Real-time data fetching from Yahoo Finance
+- News and social media sentiment analysis
+- Trading signal generation with confidence scores
+- Actionable investment recommendations
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## How It Works
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Enter a query about a stock (e.g., "What's the outlook for AAPL stock?")
+2. The AI extracts the ticker symbol and generates search queries
+3. Data is fetched from Yahoo Finance and web search results
+4. The data is analyzed and processed
+5. A trading signal with confidence score and recommended action is generated
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Technical Implementation
 
-## Learn More
+This project integrates several AI and data services:
 
-To learn more about Next.js, take a look at the following resources:
+- Google Gemini AI for natural language processing and analysis
+- Yahoo Finance API for stock market data
+- Tavily search API for web search capabilities
+- Server Actions for a seamless, modern React experience
+- TypeScript for type safety and improved developer experience
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Usage
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Simply enter your query about a stock in the input field and click "Analyze". The application will:
 
-## Deploy on Vercel
+1. Generate targeted search queries based on your request
+2. Fetch relevant financial data and news
+3. Analyze the combined information 
+4. Produce a clear trading signal with actionable insights
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Disclaimer
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+This application is for educational and simulation purposes only. It does not constitute financial advice, and no real money should be invested based on its recommendations.
