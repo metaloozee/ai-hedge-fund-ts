@@ -23,6 +23,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
+import { TextShimmer } from "@/components/ui/text-shimmer";
 
 interface StockSignal {
   signal: "bullish" | "bearish" | "neutral";
@@ -149,7 +150,7 @@ export default function HedgeFundAnalysis() {
           const chartData = stockData.quotes.map((quote: any) => ({
             date: new Date(quote.date).toLocaleDateString(),
             price: quote.close,
-            fullDate: quote.date, 
+            fullDate: quote.date,
           }));
 
           setStockData({
@@ -228,8 +229,8 @@ export default function HedgeFundAnalysis() {
           </form>
 
           {isLoading && (
-            <div className="mt-6 text-center">
-              <div className="animate-pulse">{currentStep}</div>
+            <div className="mt-6 text-left text-xs">
+              <TextShimmer>{currentStep}</TextShimmer>
             </div>
           )}
 
