@@ -44,64 +44,68 @@ interface FinanceSearchResult extends SearchResult {
   result: TavilySearchResponse | null;
 }
 
-export async function generateQueries(messages: Message[]) {
+export async function generateQueries(ticker: string) {
   try {
     const { object } = await generateObject({
       model: google("gemini-2.0-flash-001", { structuredOutputs: true }),
       schema: z.object({
-        ticker: z.string(),
         recent_queries: z
           .array(z.string())
           .max(5)
           .describe(
-            "Queries focused on the last 24-48 hours for immediate market-moving news"
+            "Queries focused on the last 24-48 hours for immediate market-moving news (e.g., earnings, analyst ratings, M&A rumors)"
           ),
         weekly_queries: z
           .array(z.string())
           .max(5)
           .describe(
-            "Queries focused on the last 7 days for developing stories and short-term trends"
+            "Queries focused on the last 7 days for developing stories, short-term trends, and competitor news"
           ),
         monthly_queries: z
           .array(z.string())
           .max(5)
           .describe(
-            "Queries focused on the last 30 days for baseline context and longer-term sentiment shifts"
+            "Queries focused on the last 30 days for baseline context, regulatory changes, and longer-term sentiment shifts"
           ),
       }),
-      messages: convertToCoreMessages(messages),
-      system: `
-You are an AI assistant specialized in financial markets. Your task is to analyze the user's message, identify the stock ticker or company name mentioned, and generate three distinct sets of search queries for different timeframes.
+      prompt: `
+You are an expert financial market AI assistant. Your goal is to generate highly relevant search queries for the stock ticker: ${ticker}.
 
-- Extract the primary stock ticker symbol (e.g., AAPL, GOOGL, MSFT). If a company name is given, find its corresponding ticker.
+Generate three distinct sets of search queries optimized for financial news APIs, covering different timeframes:
 
-- Generate up to 5 queries for the LAST 24-48 HOURS (recent_queries): 
-  * Focus exclusively on very recent market-moving news
-  * Target breaking news, earnings reports, analyst updates from the last day or two
-  * These should identify information with highest impact on immediate price movements
-  * Emphasize immediacy with terms like "today," "yesterday," "last 24 hours"
+- **Recent (24-48 Hours - \`recent_queries\`, max 5):**
+  * Focus: Immediate, high-impact news for ${ticker}.
+  * Target: Breaking news, earnings releases/calls, significant analyst rating changes, M&A activity, major partnership announcements, unexpected events impacting ${ticker} directly.
+  * Keywords: Use terms implying immediacy ("today", "yesterday", "last 24 hours", "breaking news ${ticker}").
+  * Goal: Identify information critical for near-term price action for ${ticker}.
 
-- Generate up to 5 queries for the LAST 7 DAYS (weekly_queries):
-  * Focus on developing stories and context over the past week
-  * Target weekend news that might affect Monday trading
-  * Identify short-term trends emerging over the week
-  * Use terms indicating recency but slightly broader, like "this week," "past few days"
+- **Weekly (Last 7 Days - \`weekly_queries\`, max 5):**
+  * Focus: Developing narratives and context for ${ticker}.
+  * Target: Follow-ups to recent news, competitor news impacting ${ticker}, sector trends affecting ${ticker}, weekend news relevant to Monday trading.
+  * Keywords: Use terms indicating the past week ("this week", "past few days", "last 7 days ${ticker}").
+  * Goal: Understand the short-term trend and evolving story around ${ticker}.
 
-- Generate up to 5 queries for the LAST 30 DAYS (monthly_queries):
-  * Focus on major news events from the past month
-  * Target longer-term sentiment shifts
-  * Identify if recent news represents a change from the established narrative
-  * Use broader time indicators like "this month," "recent weeks," "past 30 days"
+- **Monthly (Last 30 Days - \`monthly_queries\`, max 5):**
+  * Focus: Broader context and longer-term sentiment for ${ticker}.
+  * Target: Major news events, significant product launches, regulatory news impacting the industry/ ${ticker}, shifts in overall market sentiment towards ${ticker}.
+  * Keywords: Use broader terms ("this month", "past 30 days", "recent weeks ${ticker}").
+  * Goal: Establish a baseline understanding and identify potential shifts from the longer-term narrative for ${ticker}.
 
-Ensure all queries are precise, focused on the company/stock, and optimized for retrieving financial information relevant to trading decisions.
+**Instructions:**
+- Ensure all queries are specific to ${ticker}.
+- Phrase queries as if you were searching a financial news database (e.g., "Apple Q2 earnings results", "Nvidia analyst rating changes today").
+- Generate queries likely to yield actionable, factual information for trading decisions. Avoid vague queries.
 `,
     });
 
-    console.log("Step 1", object);
+    console.log("Step 1: Generated Queries for", ticker, object);
 
     return {
       success: true,
-      data: object,
+      data: {
+        ticker,
+        ...object,
+      },
     };
   } catch (e) {
     console.error(e);
@@ -244,39 +248,52 @@ export async function sanitizeData(
 ) {
   try {
     const { object } = await generateObject({
-      model: google("gemini-2.0-flash-001", { structuredOutputs: true }),
+      model: google("gemini-2.5-pro-exp-03-25", { structuredOutputs: true }),
       schema: z.object({
-        summary_analysis: z.array(z.string()),
+        summary_analysis: z.array(z.string()).describe("Array of concise bullet points summarizing the key findings and analysis."),
       }),
       prompt: `
-Analyze the following search results across three different timeframes:
+You are a financial analyst AI tasked with synthesizing search results about a specific stock. Analyze the provided data across three timeframes, adhering strictly to the specified weighting and methodology.
 
-PRIMARY TIMEFRAME - Last 24-48 hours (highest priority):
-${JSON.stringify(recentResults)}
+**Search Results Data:**
 
-SECONDARY TIMEFRAME - Last 7 days (context):
-${JSON.stringify(weeklyResults)}
+*   **PRIMARY TIMEFRAME (Last 24-48 hours):** High-impact, recent news.
+    \`\`\`json
+    ${JSON.stringify(recentResults)}
+    \`\`\`
+*   **SECONDARY TIMEFRAME (Last 7 days):** Context and developing stories.
+    \`\`\`json
+    ${JSON.stringify(weeklyResults)}
+    \`\`\`
+*   **BASELINE CONTEXT (Last 30 days):** Longer-term trends and narrative.
+    \`\`\`json
+    ${JSON.stringify(monthlyResults)}
+    \`\`\`
 
-BASELINE CONTEXT - Last 30 days (long-term trends):
-${JSON.stringify(monthlyResults)}
+**Analysis Methodology (Based *only* on provided data):**
 
-Based *only* on the provided search results, follow this analysis methodology:
+1.  **Weighting:**
+    *   **70% Weight:** PRIMARY (24-48 hours) - Most critical for immediate price movement.
+    *   **20% Weight:** SECONDARY (7 days) - Context for recent news and short-term trends.
+    *   **10% Weight:** BASELINE (30 days) - Identifying narrative shifts vs. long-term trends.
 
-WEIGHTING AND PRIORITIZATION:
-1. Give PRIMARY weight (70%) to the most recent information (last 24-48 hours) as this has the highest impact on immediate price movements.
-2. Assign SECONDARY weight (20%) to the weekly data to provide context for developing stories and identify short-term trends.
-3. Use the 30-day BASELINE data (10% weight) only for identifying longer-term sentiment shifts and determining if recent news represents a change in narrative.
+2.  **Analysis Guidelines:**
+    *   **Identify Key Recent News:** Extract the most significant market-moving facts from the PRIMARY timeframe.
+    *   **Contextualize:** Does the SECONDARY data support, contradict, or add nuance to the PRIMARY findings? Note any developing stories.
+    *   **Baseline Comparison:** Does the recent news (PRIMARY/SECONDARY) represent a shift from the BASELINE narrative or sentiment?
+    *   **Sentiment Assessment:** Assess the dominant sentiment (positive, negative, neutral) for each timeframe. Note changes or conflicts in sentiment. Quantify if possible (e.g., "overwhelmingly negative," "slightly positive").
+    *   **Extract Actionable Facts:** Focus on concrete information (e.g., specific financial figures, event outcomes, analyst price targets) relevant to short-term trading decisions.
+    *   **Identify Themes/Events:** Note recurring topics, major events (e.g., earnings calls, product launches), or influential opinions mentioned across the results.
+    *   **Note Contradictions:** Explicitly point out any conflicting information found between or within timeframes.
 
-ANALYSIS GUIDELINES:
-1. Summarize the key breaking news and market-moving information from the last 24-48 hours.
-2. Identify how the 7-day context either supports or conflicts with the very recent news.
-3. Note any significant shifts in narrative when comparing recent news to the 30-day baseline.
-4. Assess the general sentiment (positive, negative, neutral) across all timeframes, noting any changes.
-5. Extract factual information most relevant to potential short-term price movements.
-6. Identify recurring themes, major events, or significant opinions found in the data.
+3.  **Synthesis (\`summary_analysis\`):**
+    *   Produce a concise summary as an **array of strings**. Each string should represent a key finding or bullet point from your analysis.
+    *   **Prioritize** findings from the PRIMARY timeframe, using SECONDARY and BASELINE data for context and comparison.
+    *   Focus *exclusively* on information present in the search results.
+    *   **Do NOT** add external knowledge, opinions, predictions, or financial advice.
+    *   Structure the output clearly, perhaps grouping points by theme (e.g., Recent Earnings, Analyst Actions, Sentiment Trend).
 
-SYNTHESIS:
-Synthesize these points into a concise analysis (\`summary_analysis\`) as an array of strings, with clear emphasis on the most recent data while using the other timeframes for context. Focus on information most critical for making near-term trading decisions. Avoid making predictions or giving financial advice.
+Generate the \`summary_analysis\` array based on this methodology.
       `,
     });
 
@@ -306,33 +323,45 @@ export async function generateSignals(summary_analysis: string[]) {
       model: google("gemini-2.5-pro-exp-03-25", { structuredOutputs: true }),
       schema: z.object({
         signal: z.enum(["bullish", "bearish", "neutral"]),
-        confidence: z.number().min(0).max(100),
+        confidence: z.number().min(0).max(100).describe("Confidence level (0-100) based on the clarity, consistency, and strength of evidence in the analysis."),
         action: z.enum(["buy", "cover", "sell", "short", "hold"]),
         stocks: z
           .number()
           .min(0)
-          .describe("The number of stocks to buy, sell, or short"),
+          .int()
+          .describe("Suggested number of stocks for the action (e.g., 100). Scale based on confidence and hypothetical standard risk unit (e.g., higher confidence = potentially higher number). Keep reasonable."),
         reason: z
           .string()
-          .describe("A brief explanation for the signal and action"),
+          .describe("Concise explanation justifying the signal and action, directly referencing specific points from the provided summary_analysis."),
       }),
       prompt: `
-You are an expert financial analyst AI. Based on the following summarized analysis derived from multiple timeframes, generate a trading signal.
+You are an expert financial analyst AI. Your task is to generate a trading signal based *strictly* on the provided \`summary_analysis\`.
 
-The analysis was created using the following weighted approach:
-- PRIMARY (70%): Information from the last 24-48 hours - highest impact on immediate price movements
-- SECONDARY (20%): Data from the last 7 days - provides context for developing stories and short-term trends
-- BASELINE (10%): Information from the last 30 days - offers perspective on longer-term sentiment shifts
+**Analysis Context:**
+The provided analysis was synthesized from search results using a weighted approach:
+- PRIMARY (70%): Last 24-48 hours (immediate impact)
+- SECONDARY (20%): Last 7 days (context/trends)
+- BASELINE (10%): Last 30 days (long-term narrative)
 
-Analysis:
-${summary_analysis.join("\n")}
+**Analysis Summary:**
+\`\`\`
+${summary_analysis.join("\n- ")}
+\`\`\`
 
-Generate an object with the following fields:
-- \`signal\`: Your overall outlook (bullish, bearish, neutral).
-- \`confidence\`: Your confidence level in this signal (0-100).
-- \`action\`: The recommended trading action (buy, cover, sell, short, hold).
-- \`stocks\`: A suggested number of stocks for the action (e.g., 100). Base this on a hypothetical portfolio or a standard risk unit, but keep it reasonable.
-- \`reason\`: A concise explanation justifying your signal and action based *strictly* on the provided analysis points, with primary emphasis on the most recent information while acknowledging relevant context from longer timeframes.
+**Task:** Generate a trading signal object with the following fields:
+
+- **\`signal\` (enum: "bullish", "bearish", "neutral"):** Determine the overall directional outlook based *solely* on the analysis.
+- **\`confidence\` (number 0-100):** Assess your confidence in the signal. Higher confidence requires clear, consistent, and strong evidence in the analysis, especially from the primary timeframe. Lower confidence reflects conflicting data, weak evidence, or neutral overall findings.
+- **\`action\` (enum: "buy", "cover", "sell", "short", "hold"):** Choose the most logical trading action corresponding to the signal and confidence.
+    - Bullish: 'buy' (or 'cover' if closing a short)
+    - Bearish: 'sell' (if holding) or 'short' (to initiate)
+    - Neutral or Low Confidence: 'hold'
+- **\`stocks\` (integer):** Suggest a *hypothetical* number of shares for the action. Base this on a standard risk unit concept. Consider scaling this number relative to your confidence level (e.g., 100 for moderate confidence, 200 for high, 50 for low but actionable, 0 for hold). Keep the number reasonable for a typical trade.
+- **\`reason\` (string):** Provide a concise justification. **Crucially, link your signal, confidence, and action *directly* back to specific key findings mentioned in the \`summary_analysis\`**. Explain *why* those specific points lead to your conclusion, respecting the weighted importance of the timeframes.
+
+**Constraints:**
+- Base your entire output *only* on the provided \`summary_analysis\`. Do not use external data or make assumptions.
+- Do not give financial advice beyond generating the structured signal based on the input.
 `,
     });
 
@@ -350,6 +379,45 @@ Generate an object with the following fields:
       success: false,
       error: error instanceof Error ? error.message : "An error occurred",
     };
+  }
+}
+
+export async function validateTicker(ticker: string): Promise<{ success: boolean; ticker?: string; error?: string }> {
+  try {
+    const searchResult = await yahooFinance.search(ticker);
+
+    if (searchResult && searchResult.quotes && searchResult.quotes.length > 0) {
+      const exactMatch = searchResult.quotes.find(
+        (quote): quote is { symbol: string } & typeof quote =>
+          quote && 'symbol' in quote && typeof quote.symbol === 'string' && quote.symbol === ticker
+      );
+
+      if (exactMatch && exactMatch.symbol) {
+        return { success: true, ticker: exactMatch.symbol };
+      } else {
+        const suggestedSymbols = searchResult.quotes
+          .filter((quote): quote is { symbol: string } & typeof quote =>
+            quote && 'symbol' in quote && typeof quote.symbol === 'string'
+          )
+          .map((q) => q.symbol) 
+          .slice(0, 3)
+          .join(', ');
+
+        const errorMessage = suggestedSymbols
+          ? `Ticker symbol "${ticker}" not found. Did you mean one of these: ${suggestedSymbols}?`
+          : `Ticker symbol "${ticker}" not found. No similar symbols were identified.`;
+
+        return { success: false, error: errorMessage };
+      }
+    } else {
+      return { success: false, error: `No results found for ticker symbol: ${ticker}` };
+    }
+  } catch (error) {
+    console.error(`Validation failed for ticker "${ticker}":`, error);
+    if (error instanceof Error && (error.message.includes("Not Found") || error.message.includes("Failed to fetch"))) {
+       return { success: false, error: `Error searching for ticker symbol: ${ticker}` };
+    }
+    return { success: false, error: "Failed to validate ticker due to an unexpected error." };
   }
 }
 

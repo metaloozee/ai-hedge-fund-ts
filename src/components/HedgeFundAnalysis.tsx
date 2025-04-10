@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, FormEvent } from "react";
-import { Message } from "ai";
 import {
   fetchData,
   generateQueries,
   generateSignals,
   sanitizeData,
+  validateTicker,
 } from "@/app/_actions";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,7 +33,6 @@ interface StockSignal {
   reason: string;
 }
 
-// Define types for our server action results
 interface QueryResult {
   success: boolean;
   data?: {
@@ -71,12 +70,18 @@ interface SignalResult {
   error?: string;
 }
 
+interface ValidateResult {
+  success: boolean;
+  ticker?: string;
+  error?: string;
+}
+
 export default function HedgeFundAnalysis() {
   const [isLoading, setIsLoading] = useState(false);
   const [results, setResults] = useState<StockSignal | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState<string>("idle");
-  const [query, setQuery] = useState<string>("");
+  const [tickerInput, setTickerInput] = useState<string>("");
   const [stockData, setStockData] = useState<{
     ticker: string;
     price: number;
@@ -86,94 +91,86 @@ export default function HedgeFundAnalysis() {
   } | null>(null);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setQuery(e.target.value);
+    setTickerInput(e.target.value.toUpperCase());
   };
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!query.trim()) return;
+    const tickerToValidate = tickerInput.trim();
+    if (!tickerToValidate) return;
 
     setIsLoading(true);
     setError(null);
     setResults(null);
     setStockData(null);
-    setCurrentStep("Generating queries...");
+    setCurrentStep(`Validating ticker: ${tickerToValidate}...`);
 
-    const message: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: query,
-    };
-
-    generateQueries([message])
-      .then((queriesResult: QueryResult) => {
-        if (!queriesResult.success || !queriesResult.data) {
-          throw new Error(queriesResult.error || "Failed to generate queries");
+    validateTicker(tickerToValidate)
+      .then((validateResult: ValidateResult) => {
+        if (!validateResult.success || !validateResult.ticker) {
+          throw new Error(validateResult.error || "Invalid ticker symbol");
         }
+        const validatedTickerString = validateResult.ticker;
 
-        setCurrentStep("Fetching stock and market data...");
-        const { ticker, recent_queries, weekly_queries, monthly_queries } =
-          queriesResult.data;
+        setCurrentStep(`Generating queries for ${validatedTickerString}...`);
+        return generateQueries(validatedTickerString)
+          .then((queriesResult: QueryResult) => {
+            if (!queriesResult.success || !queriesResult.data) {
+              throw new Error(queriesResult.error || "Failed to generate queries");
+            }
+            return { validatedTicker: validatedTickerString, queriesResult };
+          });
+      })
+      .then(({ validatedTicker, queriesResult }: { validatedTicker: string, queriesResult: QueryResult }) => {
+        setCurrentStep(`Fetching stock and market data for ${validatedTicker}...`);
+        const { recent_queries, weekly_queries, monthly_queries } = queriesResult.data!;
         return fetchData(
-          ticker,
+          validatedTicker,
           recent_queries,
           weekly_queries,
           monthly_queries
-        ).then((fetchResult) => ({ queriesResult, fetchResult }));
+        ).then((fetchResult) => ({ validatedTicker, fetchResult }));
       })
-      .then(
-        ({
-          queriesResult,
-          fetchResult,
-        }: {
-          queriesResult: QueryResult;
-          fetchResult: FetchResult;
-        }) => {
-          if (!fetchResult.success || !fetchResult.data) {
-            throw new Error(fetchResult.error || "Failed to fetch data");
-          }
-
-          const {
-            ticker,
-            stockData,
-            recentResults,
-            weeklyResults,
-            monthlyResults,
-          } = fetchResult.data;
-
-          const lastQuote = stockData.quotes[stockData.quotes.length - 1];
-          const firstQuote = stockData.quotes[0];
-          const currentPrice = lastQuote.close;
-          const firstPrice = firstQuote.close;
-          const priceChange = currentPrice - firstPrice;
-
-          const chartData = stockData.quotes.map((quote: any) => ({
-            date: new Date(quote.date).toLocaleDateString(),
-            price: quote.close,
-            fullDate: quote.date,
-          }));
-
-          setStockData({
-            ticker,
-            price: currentPrice,
-            chartData,
-            priceChange,
-            firstClose: firstPrice,
-          });
-
-          setCurrentStep("Analyzing the data...");
-          return sanitizeData(
-            recentResults,
-            weeklyResults,
-            monthlyResults
-          ).then((sanitizeResult) => ({
-            queriesResult,
-            fetchResult,
-            sanitizeResult,
-          }));
+      .then(({ validatedTicker, fetchResult }: { validatedTicker: string, fetchResult: FetchResult }) => {
+        if (!fetchResult.success || !fetchResult.data) {
+          throw new Error(fetchResult.error || "Failed to fetch data");
         }
-      )
-      .then(({ sanitizeResult }: { sanitizeResult: SanitizeResult }) => {
+
+        const {
+          stockData,
+          recentResults,
+          weeklyResults,
+          monthlyResults,
+        } = fetchResult.data;
+
+        const lastQuote = stockData.quotes[stockData.quotes.length - 1];
+        const firstQuote = stockData.quotes[0];
+        const currentPrice = lastQuote.close;
+        const firstPrice = firstQuote.close;
+        const priceChange = currentPrice - firstPrice;
+
+        const chartData = stockData.quotes.map((quote: any) => ({
+          date: new Date(quote.date).toLocaleDateString(),
+          price: quote.close,
+          fullDate: quote.date,
+        }));
+
+        setStockData({
+          ticker: validatedTicker,
+          price: currentPrice,
+          chartData,
+          priceChange,
+          firstClose: firstPrice,
+        });
+
+        setCurrentStep("Analyzing the data...");
+        return sanitizeData(
+          recentResults,
+          weeklyResults,
+          monthlyResults
+        );
+      })
+      .then((sanitizeResult: SanitizeResult) => {
         if (!sanitizeResult.success || !sanitizeResult.data) {
           throw new Error(sanitizeResult.error || "Failed to sanitize data");
         }
@@ -208,20 +205,22 @@ export default function HedgeFundAnalysis() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="flex flex-col space-y-2">
-              <label htmlFor="query" className="text-sm font-medium">
-                What stock would you like to analyze?
+              <label htmlFor="ticker" className="text-sm font-medium">
+                Enter Stock Ticker:
               </label>
               <Input
-                id="query"
-                placeholder="e.g., Tell me about AAPL stock performance and future outlook"
-                value={query}
+                id="ticker"
+                placeholder="e.g., AAPL, GOOGL, MSFT"
+                value={tickerInput}
                 onChange={handleChange}
                 disabled={isLoading}
+                autoCapitalize="characters"
+                className="uppercase"
               />
             </div>
             <Button
               type="submit"
-              disabled={isLoading || !query.trim()}
+              disabled={isLoading || !tickerInput.trim()}
               className="w-full"
             >
               {isLoading ? "Analyzing..." : "Analyze"}
@@ -275,7 +274,7 @@ export default function HedgeFundAnalysis() {
                       color:
                         stockData.priceChange >= 0
                           ? "hsl(142, 76%, 36%)"
-                          : "hsl(0, 84%, 60%)", // Green or red
+                          : "hsl(0, 84%, 60%)",
                     },
                   }}
                   className="h-[30vh] w-full"
