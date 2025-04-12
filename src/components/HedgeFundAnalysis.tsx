@@ -24,6 +24,7 @@ import {
   ChartTooltipContent,
 } from "@/components/ui/chart";
 import { TextShimmer } from "@/components/ui/text-shimmer";
+import MarkdownRenderer from "./MarkdownRenderer";
 
 interface StockSignal {
   signal: "bullish" | "bearish" | "neutral";
@@ -381,9 +382,7 @@ export default function HedgeFundAnalysis() {
                   <span className="capitalize">{results.action}</span>{" "}
                   {results.stocks} stocks
                 </p>
-                <p className="text-sm text-muted-foreground">
-                  {results.reason}
-                </p>
+                <MarkdownRenderer content={results.reason} />
               </div>
             </div>
           )}

@@ -496,7 +496,7 @@ export async function generateSignals(summary_analysis: string[]) {
         reason: z
           .string()
           .describe(
-            "Detailed step-by-step justification based *strictly* on summary_analysis. Must: 1) Explicitly reference/quote key bullish/bearish points from summary_analysis. 2) Explain how timeframe weighting (Recent > Weekly > Monthly implicit in summary) led to the conclusion. 3) Directly link specific summary points to the final signal, confidence score, and action."
+            "Detailed and Descriptive step-by-step justification based *strictly* on summary_analysis. Must: 1) Explicitly reference/quote key bullish/bearish points from summary_analysis. 2) Explain how timeframe weighting (Recent > Weekly > Monthly implicit in summary) led to the conclusion. 3) Directly link specific summary points to the final signal, confidence score, and action."
           ),
       }),
       prompt: `
