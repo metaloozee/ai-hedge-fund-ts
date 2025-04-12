@@ -5,8 +5,11 @@ import { google } from "@ai-sdk/google";
 import { convertToCoreMessages, generateObject, Message } from "ai";
 import { tavily } from "@tavily/core";
 import yahooFinance from "yahoo-finance2";
+import { openrouter } from "@openrouter/ai-sdk-provider"
 
 const tvly = tavily({ apiKey: process.env.TAVILY_API_KEY });
+
+const largeModel = openrouter("google/gemini-2.5-pro-exp-03-25:free")
 
 interface SearchResult {
   query: string;
@@ -32,8 +35,19 @@ interface TavilySearchResponse {
   }[];
 }
 
+interface HistoricalQuote {
+  date: Date;
+  close: number;
+}
+
+interface HistoricalStockData {
+  quotes: HistoricalQuote[];
+  error?: string;
+}
+
 interface NewsSearchResult extends SearchResult {
   result: TavilySearchResponse | null;
+  success: boolean;
 }
 
 interface SocialSearchResult extends SearchResult {
@@ -44,57 +58,67 @@ interface FinanceSearchResult extends SearchResult {
   result: TavilySearchResponse | null;
 }
 
-export async function generateQueries(ticker: string) {
+export async function generateQueries(ticker: string, simulationDate?: Date) {
   try {
+    const dateContext = simulationDate
+      ? `as of the end of ${simulationDate.toLocaleDateString()}`
+      : "based on the latest available data";
+
+    const timeConstraints = simulationDate
+      ? ` Crucially, queries MUST be phrased to find information that would have been *knowable before* the end of ${simulationDate.toLocaleDateString()}. Do not ask about events *on* or *after* this date.`
+      : "";
+
     const { object } = await generateObject({
-      model: google("gemini-2.0-flash-001", { structuredOutputs: true }),
+      model: largeModel,
       schema: z.object({
         recent_queries: z
           .array(z.string())
           .max(5)
           .describe(
-            "Queries focused on the last 24-48 hours for immediate market-moving news (e.g., earnings, analyst ratings, M&A rumors)"
+            "Queries for high-impact news (24-48 hours prior). Examples: earnings releases, major analyst changes, M&A."
           ),
         weekly_queries: z
           .array(z.string())
           .max(5)
           .describe(
-            "Queries focused on the last 7 days for developing stories, short-term trends, and competitor news"
+            "Queries for developing stories (7 days prior). Examples: follow-up news, competitor actions, sector trends."
           ),
         monthly_queries: z
           .array(z.string())
           .max(5)
           .describe(
-            "Queries focused on the last 30 days for baseline context, regulatory changes, and longer-term sentiment shifts"
+            "Queries for broader context (30 days prior). Examples: regulatory changes, product launches, sentiment shifts."
           ),
       }),
       prompt: `
-You are an expert financial market AI assistant. Your goal is to generate highly relevant search queries for the stock ticker: ${ticker}.
+You are an expert financial market AI assistant specializing in crafting precise search queries for financial news APIs (like Tavily).
+Your goal is to generate highly relevant search queries for the stock ticker: ${ticker}, focusing on information available ${dateContext}.
 
-Generate three distinct sets of search queries optimized for financial news APIs, covering different timeframes:
+Generate three distinct sets of search queries, optimized for fact-finding and covering different timeframes relative to ${dateContext}:
 
-- **Recent (24-48 Hours - \`recent_queries\`, max 5):**
-  * Focus: Immediate, high-impact news for ${ticker}.
-  * Target: Breaking news, earnings releases/calls, significant analyst rating changes, M&A activity, major partnership announcements, unexpected events impacting ${ticker} directly.
-  * Keywords: Use terms implying immediacy ("today", "yesterday", "last 24 hours", "breaking news ${ticker}").
-  * Goal: Identify information critical for near-term price action for ${ticker}.
+- **Recent (Up to 48 Hours Prior - \`recent_queries\`, max 5):**
+  * Focus: Immediate, significant market-moving *facts* for ${ticker} leading up to ${dateContext}.
+  * Target: Confirmed earnings results, official analyst rating changes, M&A announcements, significant partnerships, major product news, unexpected factual events impacting ${ticker}.
+  * Keywords: Use precise terms implying confirmed events *before* the date ("${ticker} earnings announced before ${simulationDate?.toLocaleDateString()}", "analyst upgrades ${ticker} prior to ${simulationDate?.toLocaleDateString()}"). Avoid speculative language.
+  * Goal: Identify factual, high-impact information critical for near-term price action perception ${dateContext}.
 
-- **Weekly (Last 7 Days - \`weekly_queries\`, max 5):**
-  * Focus: Developing narratives and context for ${ticker}.
-  * Target: Follow-ups to recent news, competitor news impacting ${ticker}, sector trends affecting ${ticker}, weekend news relevant to Monday trading.
-  * Keywords: Use terms indicating the past week ("this week", "past few days", "last 7 days ${ticker}").
-  * Goal: Understand the short-term trend and evolving story around ${ticker}.
+- **Weekly (Up to 7 Days Prior - \`weekly_queries\`, max 5):**
+  * Focus: Developing factual narratives and context for ${ticker} in the week preceding ${dateContext}.
+  * Target: Follow-ups to recent news, factual competitor news impacting ${ticker}, relevant sector developments, important industry news.
+  * Keywords: Frame queries for the week leading up to the date ("${ticker} sector news week ending ${simulationDate?.toLocaleDateString()}", "${ticker} competitor results prior to ${simulationDate?.toLocaleDateString()}").
+  * Goal: Understand the verified short-term trend and evolving story around ${ticker} up to ${dateContext}.
 
-- **Monthly (Last 30 Days - \`monthly_queries\`, max 5):**
-  * Focus: Broader context and longer-term sentiment for ${ticker}.
-  * Target: Major news events, significant product launches, regulatory news impacting the industry/ ${ticker}, shifts in overall market sentiment towards ${ticker}.
-  * Keywords: Use broader terms ("this month", "past 30 days", "recent weeks ${ticker}").
-  * Goal: Establish a baseline understanding and identify potential shifts from the longer-term narrative for ${ticker}.
+- **Monthly (Up to 30 Days Prior - \`monthly_queries\`, max 5):**
+  * Focus: Broader factual context and established sentiment for ${ticker} in the month preceding ${dateContext}.
+  * Target: Major confirmed news events (product launches, regulatory decisions), significant management changes, established market sentiment shifts towards ${ticker}.
+  * Keywords: Use broader but still factual terms ("${ticker} major product launch announced month ending ${simulationDate?.toLocaleDateString()}", "regulatory news affecting ${ticker} prior to ${simulationDate?.toLocaleDateString()}").
+  * Goal: Establish a factual baseline and identify shifts from the longer-term narrative for ${ticker} leading into ${dateContext}.
 
 **Instructions:**
 - Ensure all queries are specific to ${ticker}.
-- Phrase queries as if you were searching a financial news database (e.g., "Apple Q2 earnings results", "Nvidia analyst rating changes today").
-- Generate queries likely to yield actionable, factual information for trading decisions. Avoid vague queries.
+- Phrase queries precisely for a financial news search engine, seeking *confirmed facts* or *reported events* available ${dateContext}.
+- Aim for queries likely to yield actionable, factual information (e.g., numbers, announcements, specific ratings). Avoid vague or purely sentiment-based queries (e.g., "Is ${ticker} a good buy?").
+- ${timeConstraints}
 `,
     });
 
@@ -120,7 +144,8 @@ export async function fetchData(
   ticker: string,
   recent_queries: string[],
   weekly_queries: string[],
-  monthly_queries: string[]
+  monthly_queries: string[],
+  simulationDate?: Date
 ): Promise<{
   success: boolean;
   data?: {
@@ -137,20 +162,35 @@ export async function fetchData(
     const weeklyResults: SocialSearchResult[] = [];
     const monthlyResults: FinanceSearchResult[] = [];
 
-    // Process recent queries (last 24-48 hours) - highest priority for price movements
+    const searchOptionsBase = simulationDate
+      ? { search_depth: "advanced" as const }
+      : {};
+
+    const recentEndDate = simulationDate ? simulationDate : new Date();
+    const recentStartDate = new Date(recentEndDate);
+    recentStartDate.setDate(recentEndDate.getDate() - 2);
+
     await Promise.all(
       recent_queries.map(async (query) => {
         try {
-          const res = await tvly.search(query, {
-            topic: "news",
-            time_range: "day", // Last 24 hours for most recent market-moving news
-          });
+          const options = {
+            ...searchOptionsBase,
+            topic: "news" as const,
+            ...(simulationDate && {
+              max_results: 7,
+            }),
+          };
+          const res = await tvly.search(query, options);
           const dedupedResults = deduplicateSearchResults(
             res
           ) as TavilySearchResponse;
           recentResults.push({
             query,
-            result: dedupedResults,
+            result: filterResultsByDate(
+              dedupedResults,
+              recentStartDate,
+              recentEndDate
+            ),
             success: true,
           });
         } catch (error) {
@@ -162,20 +202,32 @@ export async function fetchData(
         }
       })
     );
+
+    const weeklyEndDate = simulationDate ? simulationDate : new Date();
+    const weeklyStartDate = new Date(weeklyEndDate);
+    weeklyStartDate.setDate(weeklyEndDate.getDate() - 7);
 
     await Promise.all(
       weekly_queries.map(async (query) => {
         try {
-          const res = await tvly.search(query, {
-            topic: "general",
-            time_range: "week",
-          });
+          const options = {
+            ...searchOptionsBase,
+            topic: "general" as const,
+            ...(simulationDate && {
+              max_results: 7,
+            }),
+          };
+          const res = await tvly.search(query, options);
           const dedupedResults = deduplicateSearchResults(
             res
           ) as TavilySearchResponse;
           weeklyResults.push({
             query,
-            result: dedupedResults,
+            result: filterResultsByDate(
+              dedupedResults,
+              weeklyStartDate,
+              weeklyEndDate
+            ),
             success: true,
           });
         } catch (error) {
@@ -187,20 +239,32 @@ export async function fetchData(
         }
       })
     );
+
+    const monthlyEndDate = simulationDate ? simulationDate : new Date();
+    const monthlyStartDate = new Date(monthlyEndDate);
+    monthlyStartDate.setDate(monthlyEndDate.getDate() - 30);
 
     await Promise.all(
       monthly_queries.map(async (query) => {
         try {
-          const res = await tvly.search(query, {
-            topic: "general",
-            time_range: "month",
-          });
+          const options = {
+            ...searchOptionsBase,
+            topic: "general" as const,
+            ...(simulationDate && {
+              max_results: 7,
+            }),
+          };
+          const res = await tvly.search(query, options);
           const dedupedResults = deduplicateSearchResults(
             res
           ) as TavilySearchResponse;
           monthlyResults.push({
             query,
-            result: dedupedResults,
+            result: filterResultsByDate(
+              dedupedResults,
+              monthlyStartDate,
+              monthlyEndDate
+            ),
             success: true,
           });
         } catch (error) {
@@ -213,20 +277,37 @@ export async function fetchData(
       })
     );
 
-    const stockData = await yahooFinance.chart(ticker, {
-      period1: "2024-01-01",
-      period2: new Date().toISOString().split("T")[0],
-    });
+    let stockDataResult;
+    if (simulationDate) {
+      const simStartDate = new Date(simulationDate);
+      simStartDate.setDate(simulationDate.getDate() - 1);
+      const simEndDate = new Date(simulationDate);
+      simEndDate.setDate(simulationDate.getDate() + 1);
 
-    if (!stockData) {
-      throw new Error("Stock data not found");
+      stockDataResult = await yahooFinance.chart(ticker, {
+        period1: simStartDate.toISOString().split("T")[0],
+        period2: simEndDate.toISOString().split("T")[0],
+      });
+    } else {
+      stockDataResult = await yahooFinance.chart(ticker, {
+        period1: "2024-01-01",
+        period2: new Date().toISOString().split("T")[0],
+      });
+    }
+
+    if (!stockDataResult) {
+      throw new Error(
+        `Stock data not found for ${ticker}${
+          simulationDate ? ` around ${simulationDate.toLocaleDateString()}` : ""
+        }`
+      );
     }
 
     return {
       success: true,
       data: {
         ticker,
-        stockData,
+        stockData: stockDataResult,
         recentResults,
         weeklyResults,
         monthlyResults,
@@ -241,6 +322,78 @@ export async function fetchData(
   }
 }
 
+export async function fetchHistoricalStockData(
+  ticker: string,
+  startDate: Date,
+  endDate: Date
+): Promise<HistoricalStockData> {
+  try {
+    console.log(
+      `Fetching historical data for ${ticker} from ${
+        startDate.toISOString().split("T")[0]
+      } to ${endDate.toISOString().split("T")[0]}`
+    );
+    const result = await yahooFinance.chart(ticker, {
+      period1: startDate.toISOString().split("T")[0],
+      period2: endDate.toISOString().split("T")[0],
+      interval: "1d",
+    });
+
+    if (!result || !result.quotes || result.quotes.length === 0) {
+      console.warn(
+        `No historical quotes found for ${ticker} in the specified range.`
+      );
+      return { quotes: [], error: `No historical quotes found for ${ticker}` };
+    }
+
+    const quotes: HistoricalQuote[] = result.quotes
+      .map((q: any) => {
+        if (
+          !q ||
+          typeof q.date === "undefined" ||
+          typeof q.close !== "number"
+        ) {
+          console.warn("Skipping invalid quote entry:", q);
+          return null;
+        }
+        const date = new Date(q.date);
+        const close = q.close;
+
+        if (isNaN(date.getTime())) {
+          console.warn("Skipping quote with invalid date:", q);
+          return null;
+        }
+
+        return {
+          ...q,
+          date: date,
+          close: close,
+        };
+      })
+      .filter((q): q is HistoricalQuote => q !== null)
+      .sort(
+        (a: HistoricalQuote, b: HistoricalQuote) =>
+          a.date.getTime() - b.date.getTime()
+      );
+
+    console.log(
+      `Successfully fetched ${quotes.length} historical quotes for ${ticker}.`
+    );
+    return { quotes };
+  } catch (error) {
+    console.error(
+      `Failed to fetch historical stock data for ${ticker}:`,
+      error
+    );
+    const errorMessage =
+      error instanceof Error ? error.message : "An unknown error occurred";
+    return {
+      quotes: [],
+      error: `Failed to fetch historical data: ${errorMessage}`,
+    };
+  }
+}
+
 export async function sanitizeData(
   recentResults: NewsSearchResult[],
   weeklyResults: SocialSearchResult[],
@@ -248,52 +401,53 @@ export async function sanitizeData(
 ) {
   try {
     const { object } = await generateObject({
-      model: google("gemini-2.5-pro-exp-03-25", { structuredOutputs: true }),
+      model: largeModel,
       schema: z.object({
-        summary_analysis: z.array(z.string()).describe("Array of concise bullet points summarizing the key findings and analysis."),
+        summary_analysis: z
+          .array(z.string())
+          .max(10)
+          .describe(
+            "Array of concise bullet points (max 10 total) summarizing key findings and analysis based *only* on provided data."
+          ),
       }),
       prompt: `
-You are a financial analyst AI tasked with synthesizing search results about a specific stock. Analyze the provided data across three timeframes, adhering strictly to the specified weighting and methodology.
+You are a financial data synthesis AI. Your task is to analyze and synthesize search results about a specific stock, adhering strictly to the provided data and methodology.
 
-**Search Results Data:**
+**Input Search Results Data:**
 
-*   **PRIMARY TIMEFRAME (Last 24-48 hours):** High-impact, recent news.
+*   **PRIMARY (70% Weight - Last 24-48 hours):** High-impact, recent news. Crucial for immediate assessment.
     \`\`\`json
     ${JSON.stringify(recentResults)}
     \`\`\`
-*   **SECONDARY TIMEFRAME (Last 7 days):** Context and developing stories.
+*   **SECONDARY (20% Weight - Last 7 days):** Context and developing stories. Provides short-term trend context.
     \`\`\`json
     ${JSON.stringify(weeklyResults)}
     \`\`\`
-*   **BASELINE CONTEXT (Last 30 days):** Longer-term trends and narrative.
+*   **BASELINE (10% Weight - Last 30 days):** Longer-term trends and narrative. Used for comparison and identifying shifts.
     \`\`\`json
     ${JSON.stringify(monthlyResults)}
     \`\`\`
 
 **Analysis Methodology (Based *only* on provided data):**
 
-1.  **Weighting:**
-    *   **70% Weight:** PRIMARY (24-48 hours) - Most critical for immediate price movement.
-    *   **20% Weight:** SECONDARY (7 days) - Context for recent news and short-term trends.
-    *   **10% Weight:** BASELINE (30 days) - Identifying narrative shifts vs. long-term trends.
+1.  **Strict Weighting:** Apply the 70/20/10 weighting rigorously. Findings from the PRIMARY timeframe are most important. Use SECONDARY and BASELINE primarily for context, corroboration, contradiction, or identifying shifts.
 
-2.  **Analysis Guidelines:**
-    *   **Identify Key Recent News:** Extract the most significant market-moving facts from the PRIMARY timeframe.
-    *   **Contextualize:** Does the SECONDARY data support, contradict, or add nuance to the PRIMARY findings? Note any developing stories.
-    *   **Baseline Comparison:** Does the recent news (PRIMARY/SECONDARY) represent a shift from the BASELINE narrative or sentiment?
-    *   **Sentiment Assessment:** Assess the dominant sentiment (positive, negative, neutral) for each timeframe. Note changes or conflicts in sentiment. Quantify if possible (e.g., "overwhelmingly negative," "slightly positive").
-    *   **Extract Actionable Facts:** Focus on concrete information (e.g., specific financial figures, event outcomes, analyst price targets) relevant to short-term trading decisions.
-    *   **Identify Themes/Events:** Note recurring topics, major events (e.g., earnings calls, product launches), or influential opinions mentioned across the results.
-    *   **Note Contradictions:** Explicitly point out any conflicting information found between or within timeframes.
+2.  **Analysis Steps:**
+    *   **Identify Key PRIMARY Facts:** What are the most critical, potentially market-moving facts reported in the last 24-48 hours?
+    *   **Contextualize with SECONDARY:** Does the 7-day data confirm, contradict, or add nuance to the PRIMARY facts? Are there developing trends?
+    *   **Compare with BASELINE:** Does the recent news (PRIMARY/SECONDARY) align with or diverge from the 30-day context/sentiment?
+    *   **Assess Sentiment (Data-Driven):** What is the dominant sentiment (positive, negative, neutral) evident *in the text* of the results for each period? Note significant shifts or conflicts.
+    *   **Extract Actionable Facts:** Prioritize concrete details (figures, specific events, price targets mentioned).
+    *   **Note Key Themes/Contradictions:** Identify recurring topics or conflicting reports within or across timeframes.
 
-3.  **Synthesis (\`summary_analysis\`):**
-    *   Produce a concise summary as an **array of strings**. Each string should represent a key finding or bullet point from your analysis.
-    *   **Prioritize** findings from the PRIMARY timeframe, using SECONDARY and BASELINE data for context and comparison.
-    *   Focus *exclusively* on information present in the search results.
-    *   **Do NOT** add external knowledge, opinions, predictions, or financial advice.
-    *   Structure the output clearly, perhaps grouping points by theme (e.g., Recent Earnings, Analyst Actions, Sentiment Trend).
+3.  **Output Synthesis (\`summary_analysis\`):**
+    *   Produce a concise summary as an **array of strings (max 10 bullet points total)**.
+    *   **Start with the most impactful findings from the PRIMARY (70%) data.** Then integrate key context/shifts identified from SECONDARY (20%) and BASELINE (10%) data.
+    *   Each string must be a distinct, factual observation derived *directly* from the provided search results.
+    *   Structure points logically (e.g., group by theme like Earnings, Competition, Sentiment).
+    *   **Crucially: Do NOT add external knowledge, interpretations, predictions, or financial advice.** Stick strictly to synthesizing the provided text data according to the weights.
 
-Generate the \`summary_analysis\` array based on this methodology.
+Generate the \`summary_analysis\` array based *only* on this methodology and the provided JSON data. Ensure conciseness and adherence to the bullet point count limit.
       `,
     });
 
@@ -320,48 +474,65 @@ Generate the \`summary_analysis\` array based on this methodology.
 export async function generateSignals(summary_analysis: string[]) {
   try {
     const { object } = await generateObject({
-      model: google("gemini-2.5-pro-exp-03-25", { structuredOutputs: true }),
+      model: largeModel,
       schema: z.object({
         signal: z.enum(["bullish", "bearish", "neutral"]),
-        confidence: z.number().min(0).max(100).describe("Confidence level (0-100) based on the clarity, consistency, and strength of evidence in the analysis."),
+        confidence: z
+          .number()
+          .min(0)
+          .max(100)
+          .int()
+          .describe(
+            "Confidence (0-100) based *only* on the clarity, consistency, and strength of evidence in the summary_analysis. High confidence requires strong, consistent evidence, especially weighted towards recent data."
+          ),
         action: z.enum(["buy", "cover", "sell", "short", "hold"]),
         stocks: z
           .number()
           .min(0)
           .int()
-          .describe("Suggested number of stocks for the action (e.g., 100). Scale based on confidence and hypothetical standard risk unit (e.g., higher confidence = potentially higher number). Keep reasonable."),
+          .describe(
+            "Hypothetical number of shares (0-200 scale). 0 for hold. ~50 for low confidence action, ~100 for moderate, ~200 for high. Based purely on confidence derived from the analysis."
+          ),
         reason: z
           .string()
-          .describe("Concise explanation justifying the signal and action, directly referencing specific points from the provided summary_analysis."),
+          .describe(
+            "Detailed step-by-step justification based *strictly* on summary_analysis. Must: 1) Explicitly reference/quote key bullish/bearish points from summary_analysis. 2) Explain how timeframe weighting (Recent > Weekly > Monthly implicit in summary) led to the conclusion. 3) Directly link specific summary points to the final signal, confidence score, and action."
+          ),
       }),
       prompt: `
-You are an expert financial analyst AI. Your task is to generate a trading signal based *strictly* on the provided \`summary_analysis\`.
+You are an AI financial signal generator. Your task is to generate a trading signal based *exclusively* on the provided \`summary_analysis\` (which implicitly reflects weighted timeframes: 70% Recent, 20% Weekly, 10% Monthly).
 
-**Analysis Context:**
-The provided analysis was synthesized from search results using a weighted approach:
-- PRIMARY (70%): Last 24-48 hours (immediate impact)
-- SECONDARY (20%): Last 7 days (context/trends)
-- BASELINE (10%): Last 30 days (long-term narrative)
-
-**Analysis Summary:**
+**Input Analysis Summary:**
 \`\`\`
-${summary_analysis.join("\n- ")}
+${summary_analysis.map(s => `- ${s}`).join("\n")}
 \`\`\`
 
-**Task:** Generate a trading signal object with the following fields:
+**Task:** Generate a trading signal object based *only* on the text above.
 
-- **\`signal\` (enum: "bullish", "bearish", "neutral"):** Determine the overall directional outlook based *solely* on the analysis.
-- **\`confidence\` (number 0-100):** Assess your confidence in the signal. Higher confidence requires clear, consistent, and strong evidence in the analysis, especially from the primary timeframe. Lower confidence reflects conflicting data, weak evidence, or neutral overall findings.
-- **\`action\` (enum: "buy", "cover", "sell", "short", "hold"):** Choose the most logical trading action corresponding to the signal and confidence.
-    - Bullish: 'buy' (or 'cover' if closing a short)
-    - Bearish: 'sell' (if holding) or 'short' (to initiate)
-    - Neutral or Low Confidence: 'hold'
-- **\`stocks\` (integer):** Suggest a *hypothetical* number of shares for the action. Base this on a standard risk unit concept. Consider scaling this number relative to your confidence level (e.g., 100 for moderate confidence, 200 for high, 50 for low but actionable, 0 for hold). Keep the number reasonable for a typical trade.
-- **\`reason\` (string):** Provide a concise justification. **Crucially, link your signal, confidence, and action *directly* back to specific key findings mentioned in the \`summary_analysis\`**. Explain *why* those specific points lead to your conclusion, respecting the weighted importance of the timeframes.
+- **\`signal\` (enum: "bullish", "bearish", "neutral"):** Determine the overall directional outlook derived *strictly* from the summary points.
+- **\`confidence\` (integer 0-100):** Assess confidence based *only* on the evidence in the summary.
+    - High (71-100): Clear, consistent, strong evidence heavily supported by recent (implicitly primary) points.
+    - Moderate (31-70): Mixed signals, or evidence is present but not overwhelming.
+    - Low (0-30): Contradictory, weak, or predominantly neutral evidence.
+- **\`action\` (enum: "buy", "cover", "sell", "short", "hold"):** Choose the logical action based on signal and confidence.
+    - Bullish (Conf > 30): 'buy' / 'cover'
+    - Bearish (Conf > 30): 'sell' / 'short'
+    - Neutral or Low Confidence (<= 30): 'hold'
+- **\`stocks\` (integer 0-200):** Suggest a *hypothetical* number of shares based *only* on confidence.
+    - 0: If action is 'hold'.
+    - ~50: Low actionable confidence (e.g., 31-50).
+    - ~100: Moderate confidence (e.g., 51-75).
+    - ~200: High confidence (e.g., 76-100).
+    (Use rough guidelines, exact number isn't critical).
+- **\`reason\` (string):** Provide a detailed justification adhering *strictly* to these steps:
+    1.  **Quote Supporting Evidence:** Explicitly quote or reference the specific bullet point(s) from \`summary_analysis\` that support a bullish outlook. Do the same for bearish points. State if evidence is lacking for either.
+    2.  **Explain Weighting Impact:** Briefly explain how the (implicit) emphasis on more recent information (predominantly captured in the summary) influenced the signal determination when weighing the bullish vs. bearish points.
+    3.  **Link to Conclusion:** Clearly connect the identified evidence and weighting assessment to the final \`signal\`, the calculated \`confidence\` score, the chosen \`action\`, and the suggested \`stocks\` number. Justify *why* the evidence leads to this specific output.
 
-**Constraints:**
-- Base your entire output *only* on the provided \`summary_analysis\`. Do not use external data or make assumptions.
-- Do not give financial advice beyond generating the structured signal based on the input.
+**CRITICAL Constraints:**
+- Base your *entire* output *SOLELY* on the provided \`summary_analysis\` text.
+- Do NOT use any external data, prior knowledge, or make assumptions beyond what is written in the summary.
+- Do NOT provide financial advice; simply generate the structured signal based *only* on the input.
 `,
     });
 
@@ -382,26 +553,32 @@ ${summary_analysis.join("\n- ")}
   }
 }
 
-export async function validateTicker(ticker: string): Promise<{ success: boolean; ticker?: string; error?: string }> {
+export async function validateTicker(
+  ticker: string
+): Promise<{ success: boolean; ticker?: string; error?: string }> {
   try {
     const searchResult = await yahooFinance.search(ticker);
 
     if (searchResult && searchResult.quotes && searchResult.quotes.length > 0) {
       const exactMatch = searchResult.quotes.find(
         (quote): quote is { symbol: string } & typeof quote =>
-          quote && 'symbol' in quote && typeof quote.symbol === 'string' && quote.symbol === ticker
+          quote &&
+          "symbol" in quote &&
+          typeof quote.symbol === "string" &&
+          quote.symbol === ticker
       );
 
       if (exactMatch && exactMatch.symbol) {
         return { success: true, ticker: exactMatch.symbol };
       } else {
         const suggestedSymbols = searchResult.quotes
-          .filter((quote): quote is { symbol: string } & typeof quote =>
-            quote && 'symbol' in quote && typeof quote.symbol === 'string'
+          .filter(
+            (quote): quote is { symbol: string } & typeof quote =>
+              quote && "symbol" in quote && typeof quote.symbol === "string"
           )
-          .map((q) => q.symbol) 
+          .map((q) => q.symbol)
           .slice(0, 3)
-          .join(', ');
+          .join(", ");
 
         const errorMessage = suggestedSymbols
           ? `Ticker symbol "${ticker}" not found. Did you mean one of these: ${suggestedSymbols}?`
@@ -410,14 +587,27 @@ export async function validateTicker(ticker: string): Promise<{ success: boolean
         return { success: false, error: errorMessage };
       }
     } else {
-      return { success: false, error: `No results found for ticker symbol: ${ticker}` };
+      return {
+        success: false,
+        error: `No results found for ticker symbol: ${ticker}`,
+      };
     }
   } catch (error) {
     console.error(`Validation failed for ticker "${ticker}":`, error);
-    if (error instanceof Error && (error.message.includes("Not Found") || error.message.includes("Failed to fetch"))) {
-       return { success: false, error: `Error searching for ticker symbol: ${ticker}` };
+    if (
+      error instanceof Error &&
+      (error.message.includes("Not Found") ||
+        error.message.includes("Failed to fetch"))
+    ) {
+      return {
+        success: false,
+        error: `Error searching for ticker symbol: ${ticker}`,
+      };
     }
-    return { success: false, error: "Failed to validate ticker due to an unexpected error." };
+    return {
+      success: false,
+      error: "Failed to validate ticker due to an unexpected error.",
+    };
   }
 }
 
@@ -479,4 +669,33 @@ function deduplicateSearchResults(searchResults: any): TavilySearchResponse {
   }
 
   return dedupedResults;
+}
+
+function filterResultsByDate(
+  searchResponse: TavilySearchResponse | null,
+  startDate: Date,
+  endDate: Date
+): TavilySearchResponse | null {
+  if (!searchResponse || !searchResponse.results) {
+    return searchResponse;
+  }
+
+  const filteredResults = searchResponse.results.filter((item) => {
+    if (!item.published_date) {
+      return true;
+    }
+    try {
+      const itemDate = new Date(item.published_date);
+      if (isNaN(itemDate.getTime())) return false;
+      return itemDate >= startDate && itemDate <= endDate;
+    } catch (e) {
+      console.warn("Could not parse date:", item.published_date);
+      return false;
+    }
+  });
+
+  return {
+    ...searchResponse,
+    results: filteredResults,
+  };
 }
