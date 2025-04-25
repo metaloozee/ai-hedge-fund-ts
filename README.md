@@ -34,7 +34,7 @@ Simply enter your query about a stock in the input field and click "Analyze". Th
 
 1. Generate targeted search queries based on your request
 2. Fetch relevant financial data and news
-3. Analyze the combined information 
+3. Analyze the combined information
 4. Produce a clear trading signal with actionable insights
 
 ## Disclaimer
