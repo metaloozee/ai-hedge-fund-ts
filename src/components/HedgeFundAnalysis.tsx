@@ -374,7 +374,7 @@ export default function HedgeFundAnalysis() {
                                                 : 'text-red-500'
                                         }`}
                                     >
-                                        ${stockData.price.toFixed(2)}
+                                        {stockData.price.toFixed(2)}
                                     </span>
                                 </div>
 
@@ -491,7 +491,6 @@ export default function HedgeFundAnalysis() {
                                                             Conservative:
                                                         </span>{' '}
                                                         <span className="font-medium">
-                                                            $
                                                             {signal.price_targets.conservative.toFixed(
                                                                 2
                                                             )}
@@ -504,7 +503,6 @@ export default function HedgeFundAnalysis() {
                                                             Base Case:
                                                         </span>{' '}
                                                         <span className="font-medium">
-                                                            $
                                                             {signal.price_targets.base_case.toFixed(
                                                                 2
                                                             )}
@@ -517,7 +515,6 @@ export default function HedgeFundAnalysis() {
                                                             Optimistic:
                                                         </span>{' '}
                                                         <span className="font-medium">
-                                                            $
                                                             {signal.price_targets.optimistic.toFixed(
                                                                 2
                                                             )}
@@ -567,7 +564,7 @@ export default function HedgeFundAnalysis() {
                                                 {report.stock_performance.key_price_points.map(
                                                     (point, idx) => (
                                                         <li key={idx}>
-                                                            {point.description}: $
+                                                            {point.description}:
                                                             {point.value.toFixed(2)}
                                                         </li>
                                                     )
